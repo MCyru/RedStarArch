@@ -4,7 +4,10 @@
 #  Uso:  sudo ./build-arch-aesthetic.sh /caminho/wallpaper.(jpg|png|mp4|webm|gif) /caminho/saida
 #  Roda no WSL (Arch) ou em qualquer Arch, como root, com internet. O intuito é criar uma iso pra instalar em um pendrive ou maquina essa customizacao especifica.
 # =====================================================================
-set -e
+set -eE
+LOG="$HOME/build-arch-aesthetic.log"
+exec > >(tee -a "$LOG") 2>&1
+trap 'echo "ERROR on line $LINENO. Full log: $LOG"' ERR
 WALL="$1"
 OUT="$2"
 
@@ -34,6 +37,7 @@ echo "== 3/9 Colors" #ajuste de cores e tematicas
 hex2rgb() { printf '%d, %d, %d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }
 case "$THEME" in
   pink)   ACC=ffb3d9; SEC=c3a6ff ;; # ajustar manualmente se quiser, recomendo que nao no entanto
+  red)    ACC=ff8fa3; SEC=c3a6ff ;;
   violet) ACC=c3a6ff; SEC=a9c8ff ;; # '' '' 
   auto)
     if [ $IS_VIDEO = 0 ]; then #Daqui pra frente mecheu quebra, so ignorar o auto target do video
@@ -104,6 +108,16 @@ polkit
 polkit-gnome
 dconf
 libnotify
+xdg-user-dirs
+zip
+unzip
+man-db
+man-pages
+less
+bash-completion
+wget
+openssh
+rsync
 socat
 wtype
 xdg-utils
@@ -170,6 +184,23 @@ bibata-cursor-theme
 nwg-look
 nwg-displays
 hyprsunset
+7zip
+p7zip
+unrar
+gvfs-mtp
+gvfs-smb
+gnome-keyring
+libsecret
+firefox-i18n-pt-br
+hunspell-pt-br
+man-pages-pt_br
+jdk-openjdk
+nodejs
+npm
+python-pip
+valgrind
+github-cli
+sqlite
 nwg-drawer
 vulkan-nouveau
 vulkan-swrast
@@ -180,17 +211,24 @@ gnome-calculator
 "
 EXTRAS="
 libreoffice-fresh
+libreoffice-fresh-pt-br
 gimp
 noto-fonts-cjk
 flatpak
 gnome-software
 "
 for p in $REQUIRED; do echo "$p" >> ~/live/packages.x86_64; done #retry
-MISS=0
+CRITICAL=" hyprland networkmanager waybar kitty wofi firefox code pipewire wireplumber sudo linux-firmware polkit "
+MISS=0; DROPPED=""
 for p in $(grep -v '^#' ~/live/packages.x86_64 | grep -v '^$' | sort -u); do
-  pacman -Si "$p" >/dev/null 2>&1 || { echo "MISSING PACKAGE: $p"; MISS=1; }
+  if ! pacman -Si "$p" >/dev/null 2>&1; then
+    case "$CRITICAL" in
+      *" $p "*) echo "MISSING CRITICAL PACKAGE: $p"; MISS=1 ;;
+      *) echo "WARNING: package not found, dropping it: $p"; DROPPED="$DROPPED $p"; sed -i "/^$p\$/d" ~/live/packages.x86_64 ;;
+    esac
+  fi
 done
-[ $MISS = 0 ] || { echo "ERROR: fix the package names above and run again"; exit 1; }
+[ $MISS = 0 ] || { echo "ERROR: fix the critical package names above and run again"; exit 1; }
 
 HAS_CURSOR=0; HAS_PAPIRUS=0; HAS_ADW=0; HAS_FLATPAK=0
 add_optional() {
@@ -323,6 +361,7 @@ exec-once = nm-applet --indicator
 exec-once = blueman-applet
 exec-once = /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
 exec-once = hypridle
+exec-once = xdg-user-dirs-update
 exec-once = ~/.local/bin/taskbar-daemon
 exec-once = ~/.local/bin/net-tasks
 exec-once = ~/.local/bin/lite-mode boot
@@ -342,6 +381,7 @@ bind = $mod, I, exec, ~/.local/bin/settings-menu
 bind = $mod, P, exec, ~/.local/bin/display-mode
 bind = $mod, PERIOD, exec, ~/.local/bin/emoji-picker
 bind = $mod SHIFT, B, exec, ~/.local/bin/lite-mode
+bind = $mod, F1, exec, ~/.local/bin/shortcuts-help
 bind = $mod, X, exec, ~/.local/bin/power-menu
 bind = $mod, N, exec, swaync-client -t -sw
 bind = $mod, L, exec, hyprlock
@@ -357,6 +397,7 @@ bind = SHIFT, Print, exec, grim ~/Pictures/print-$(date +%s).png
 bind = $mod, Q, killactive
 bind = ALT, F4, killactive
 bind = ALT, TAB, cyclenext
+bind = ALT, TAB, bringactivetotop
 bind = $mod, F, fullscreen
 bind = $mod, UP, fullscreen, 1
 bind = $mod, DOWN, togglefloating
@@ -493,10 +534,11 @@ EOF
 cat > $S/.bash_profile << 'EOF'
 if [ "$(tty)" = "/dev/tty1" ]; then
   if grep -qw 'aessafe=1' /proc/cmdline; then exec ~/.local/bin/start-fallback; fi
+  t0=$(date +%s)
   if command -v start-hyprland >/dev/null 2>&1; then start-hyprland; else Hyprland; fi
   rc=$?
-  # saida normal (Super+Shift+E) = 0; erro/crash = abre o desktop de emergencia
-  if [ $rc -ne 0 ]; then exec ~/.local/bin/start-fallback; fi
+  # falha logo ao iniciar (<60s) = abre o desktop de emergencia; sair normalmente volta ao login
+  if [ $rc -ne 0 ] && [ $(( $(date +%s) - t0 )) -lt 60 ]; then exec ~/.local/bin/start-fallback; fi
   exit 0
 fi
 EOF
@@ -722,6 +764,39 @@ while pending && [ $tries -lt 5 ]; do
   tries=$((tries+1))
 done
 pending || notify-send "Configuracao inicial" "Tudo pronto."
+EOF
+cat > $S/.local/bin/shortcuts-help << 'EOF'
+#!/bin/bash
+# Super+F1 : lista de atalhos
+cat << 'LIST' | wofi --dmenu --prompt "Atalhos" --width 560 --height 560 --hide-scroll > /dev/null
+Super+D ou Super+Espaco   Menu Iniciar
+Super+E                   Arquivos
+Super+B                   Navegador
+Super+C                   VS Code
+Super+Enter               Terminal
+Super+S                   Pesquisar arquivos
+Super+V                   Historico da area de transferencia
+Super+.                   Emojis
+Super+Shift+S             Captura de tela com edicao
+Print                     Captura de area para a area de transferencia
+Super+I                   Configuracoes
+Super+P                   Projetar (duplicar/estender tela)
+Super+N                   Central de notificacoes
+Super+L                   Bloquear tela
+Super+X                   Menu de energia
+Super+Shift+B             Modo leve (liga/desliga)
+Alt+Tab                   Alternar janelas
+Alt+F4 ou Super+Q         Fechar janela
+Super+Cima                Maximizar
+Super+Baixo ou Super+T    Janela flutuante (liga/desliga)
+Super+Alt+setas           Encaixar janela (metade da tela)
+Super+Alt+1..4            Encaixar janela (cantos)
+Super+1..4                Areas de trabalho
+Super+Shift+1..4          Mover janela para a area de trabalho
+Ctrl+Shift+Esc            Gerenciador de tarefas
+Super+arrastar            Mover/redimensionar janela com o mouse
+Super+Shift+E             Sair da sessao
+LIST
 EOF
 chmod +x $S/.local/bin/*
 
@@ -1317,7 +1392,31 @@ echo '%wheel ALL=(ALL:ALL) ALL' > $A/etc/sudoers.d/wheel
 chmod 440 $A/etc/sudoers.d/wheel
 echo 'file_permissions+=(["/etc/sudoers.d/wheel"]="0:0:440")' >> ~/live/profiledef.sh
 echo KEYMAP=br-abnt2 > $A/etc/vconsole.conf
+printf 'pt_BR.UTF-8 UTF-8\nen_US.UTF-8 UTF-8\n' > $A/etc/locale.gen
+echo LANG=pt_BR.UTF-8 > $A/etc/locale.conf
+cat > $A/etc/systemd/system/locale-gen.service << 'EOF'
+[Unit]
+Description=Generate locales
+Before=getty@tty1.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/locale-gen
+[Install]
+WantedBy=multi-user.target
+EOF
+ln -sf /etc/systemd/system/locale-gen.service $A/etc/systemd/system/multi-user.target.wants/locale-gen.service
 ln -sf /usr/share/zoneinfo/America/Sao_Paulo $A/etc/localtime
+
+echo "== Preflight checks"
+BAD=0
+for f in $S/.local/bin/*; do bash -n "$f" || { echo "SYNTAX ERROR in $f"; BAD=1; }; done
+for f in $S/.config/waybar/config $S/.config/waybar/config-fallback $S/.config/swaync/config.json "$S/.config/Code - OSS/User/settings.json"; do
+  python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" || { echo "BAD JSON in $f"; BAD=1; }
+done
+if grep -rIl --exclude-dir=nvim -e '@ACC@' -e '@SEC@' -e '@ACC_RGB@' -e '@SEC_RGB@' -e '@USER@' $S; then
+  echo "ERROR: unreplaced placeholders in the files above"; BAD=1
+fi
+[ $BAD = 0 ] || { echo "ERROR: preflight failed, ISO not built"; exit 1; }
 
 echo "== 9/9 Boot options and build"
 if [ "$COPYTORAM" = 1 ]; then BOOTOPTS="copytoram=y cow_spacesize=4G"; else BOOTOPTS="cow_spacesize=4G"; fi
@@ -1329,7 +1428,8 @@ for f in ~/live/efiboot/loader/entries/*.conf; do
   grep -q archisobasedir "$f" || continue
   d=$(dirname "$f"); b=$(basename "$f" .conf)
   for v in lite safe; do
-    sed -e "s/^title .*/& - ${v^} mode/" -e "s/^options .*/& aes${v}=1/" "$f" > "$d/$b-$v.conf"
+    x=""; [ $v = safe ] && x=" nomodeset"
+    sed -e "s/^title .*/& - ${v^} mode/" -e "s/^options .*/& aes${v}=1$x/" "$f" > "$d/$b-$v.conf"
   done
 done
 for f in ~/live/syslinux/archiso_sys-linux.cfg; do
@@ -1338,7 +1438,8 @@ for f in ~/live/syslinux/archiso_sys-linux.cfg; do
   cp "$f" /tmp/sys-linux.orig
   echo >> "$f"
   for v in lite safe; do
-    sed -e '/MENU DEFAULT/d' -e "s/^\\(LABEL .*\\)/\\1$v/" -e "s/^\\(MENU LABEL .*\\)/\\1 - ${v^} mode/" -e "s/^\\(APPEND .*\\)/\\1 aes${v}=1/" /tmp/sys-linux.orig >> "$f"
+    x=""; [ $v = safe ] && x=" nomodeset"
+    sed -e '/MENU DEFAULT/d' -e "s/^\\(LABEL .*\\)/\\1$v/" -e "s/^\\(MENU LABEL .*\\)/\\1 - ${v^} mode/" -e "s/^\\(APPEND .*\\)/\\1 aes${v}=1$x/" /tmp/sys-linux.orig >> "$f"
     echo >> "$f"
   done
 done
@@ -1348,5 +1449,10 @@ echo "== Copying ISO to Windows"
 cp ~/out/*.iso "$OUT"/
 rm -rf ~/work
 ls -lh "$OUT"/*.iso
-echo "== DONE. The ISO is in: $OUT"
-[ "$COPYTORAM" = 1 ] && echo "NOTE: copytoram needs RAM >= ISO size + ~2GB on the computer you boot."
+sha256sum "$OUT"/*.iso
+echo "== DONE. The ISO is in: $OUT   (log: $LOG)"
+[ -z "$DROPPED" ] || echo "NOTE: these packages were not found and were left out:$DROPPED"
+if [ "$COPYTORAM" = 1 ]; then
+  echo "NOTE: copytoram needs RAM >= ISO size + ~2GB on the computer you boot."
+fi
+echo "TIP: flash with Rufus in 'DD Image' mode (or balenaEtcher / Ventoy) and test in a VM first."
