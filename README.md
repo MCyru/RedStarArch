@@ -6,4 +6,4 @@ Mostly its made to run a no persistent system iso creation to be used on rufus s
 wsl --install archlinux
 
 Command Usage:
-sudo build-arch.sh /mnt/c/Users/Me/Downloads/wall.jpg(or png) /mnt/c/Users/Me/Downloads/Output
+sudo bash build-arch.sh /mnt/c/Users/Me/Downloads/wall.jpg(or png) /mnt/c/Users/Me/Downloads/Output
